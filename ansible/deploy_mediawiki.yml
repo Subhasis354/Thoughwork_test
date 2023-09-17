@@ -1,0 +1,196 @@
+# deploy_mediawiki.yml
+---
+- name: Install and Configure Required Software
+  hosts: your_target_hosts
+  become: yes  # Use sudo to become a privileged user
+
+  tasks:
+    - name: Install CentOS Software Collections repository
+      yum:
+        name: centos-release-scl
+        state: present
+
+    - name: Install required packages for PHP 7.3
+      yum:
+        name:
+          - httpd24-httpd
+          - rh-php73
+          - rh-php73-php
+          - rh-php73-php-mbstring
+          - rh-php73-php-mysqlnd
+          - rh-php73-php-gd
+          - rh-php73-php-xml
+          - mariadb-server
+          - mariadb
+        state: present
+
+    - name: Reset PHP module
+      command: dnf module reset php
+      when: ansible_distribution == 'CentOS' and ansible_distribution_major_version == '8'
+
+    - name: Enable PHP 7.4 module
+      command: dnf module enable php:7.4
+      when: ansible_distribution == 'CentOS' and ansible_distribution_major_version == '8'
+
+    - name: Install required packages for PHP 7.4
+      dnf:
+        name:
+          - httpd
+          - php
+          - php-mysqlnd
+          - php-gd
+          - php-xml
+          - mariadb-server
+          - mariadb
+          - php-mbstring
+          - php-json
+          - mod_ssl
+          - php-intl
+          - php-apcu
+      when: ansible_distribution == 'CentOS' and ansible_distribution_major_version == '8'
+
+    - name: Configure Apache DocumentRoot for PHP 7.3
+      lineinfile:
+        path: /etc/opt/rh/httpd24/conf/httpd.conf
+        regexp: "^DocumentRoot"
+        line: "DocumentRoot \"/opt/rh/httpd24/root/var/www/html\""
+      notify:
+        - restart apache
+
+    - name: Configure PHP DocumentRoot for PHP 7.3
+      lineinfile:
+        path: /etc/opt/rh/rh-php73/php-fpm.d/www.conf
+        regexp: "^chdir"
+        line: "chdir = /opt/rh/rh-php73/root/var/www/html"
+      notify:
+        - restart php-fpm
+
+  handlers:
+    - name: restart apache
+      service:
+        name: httpd24-httpd
+        state: restarted
+
+    - name: restart php-fpm
+      service:
+        name: rh-php73-php-fpm
+        state: restarted
+
+- name: Configure MariaDB for MediaWiki
+  tasks:
+    - name: Start MariaDB service
+      systemd:
+        name: mariadb
+        state: started
+
+    - name: Secure MariaDB installation
+      expect:
+        command: mysql_secure_installation
+        responses:
+          'Enter current password for root (enter for none):': ''
+          'Set root password? [Y/n]': 'Y'
+          'New password:': 'YOUR_ROOT_PASSWORD'  # Replace with your desired root password
+          'Re-enter new password:': 'YOUR_ROOT_PASSWORD'  # Replace with your desired root password
+          'Remove anonymous users? [Y/n]': 'Y'
+          'Disallow root login remotely? [Y/n]': 'Y'
+          'Remove test database and access to it? [Y/n]': 'Y'
+          'Reload privilege tables now? [Y/n]': 'Y'
+
+    - name: Create MariaDB user for MediaWiki
+      mysql_user:
+        name: wiki
+        host: localhost
+        password: YOUR_USER_PASSWORD  # Replace with your desired password
+        priv: 'wikidatabase.*:ALL'
+
+    - name: Create MediaWiki database
+      mysql_db:
+        name: wikidatabase
+
+- name: Install and Configure MediaWiki
+  tasks:
+    - name: Create a directory for MediaWiki installation
+      file:
+        path: /home/username
+        state: directory
+        owner: username  # Replace with the actual username
+        group: username  # Replace with the actual group name
+        mode: '0755'
+
+    - name: Download MediaWiki tarball
+      get_url:
+        url: https://releases.wikimedia.org/mediawiki/1.40/mediawiki-1.40.0.tar.gz
+        dest: /home/username/mediawiki-1.40.0.tar.gz
+        mode: '0644'
+      become_user: username  # Replace with the actual username
+
+    - name: Download GPG signature and verify tarball
+      get_url:
+        url: https://releases.wikimedia.org/mediawiki/1.40/mediawiki-1.40.0.tar.gz.sig
+        dest: /home/username/mediawiki-1.40.0.tar.gz.sig
+        mode: '0644'
+      become_user: username  # Replace with the actual username
+
+    - name: Verify GPG signature
+      command: gpg --verify /home/username/mediawiki-1.40.0.tar.gz.sig /home/username/mediawiki-1.40.0.tar.gz
+      become_user: username  # Replace with the actual username
+
+    - name: Extract MediaWiki tarball
+      unarchive:
+        src: /home/username/mediawiki-1.40.0.tar.gz
+        dest: /var/www
+        remote_src: yes
+        owner: apache
+        group: apache 
+        extra_opts: ['--strip-components=1']
+
+    - name: Create symbolic link for easy upgrading
+      file:
+        src: /var/www/mediawiki-1.40.0
+        dest: /var/www/mediawiki
+        state: link
+        owner: apache
+        group: apache
+
+    - name: Change Apache configuration for MediaWiki
+      lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: "^DocumentRoot"
+        line: "DocumentRoot \"/var/www/mediawiki\""
+      notify:
+        - restart apache
+    
+    - name: Configure Apache Alias for MediaWiki
+      lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: "^Alias /mediawiki"
+        line: "Alias /mediawiki /var/www/mediawiki"
+      notify:
+        - restart apache
+    
+    - name: Restart Apache
+      service:
+        name: httpd
+        state: restarted
+
+    - name: Open HTTP and HTTPS ports in the firewall
+      firewalld:
+        zone: public
+        service: "{{ item }}"
+        state: enabled
+        permanent: yes
+      loop:
+        - http
+        - https
+
+    - name: Set SELinux context for MediaWiki files
+      command: restorecon -FR /var/www/mediawiki
+    
+    - name: Check SELinux context on MediaWiki files
+      command: ls -lZ /var/www/mediawiki
+      register: selinux_context
+      become_user: root
+
+    - name: Display SELinux context
+      debug:
+        var: selinux_context.stdout_lines
