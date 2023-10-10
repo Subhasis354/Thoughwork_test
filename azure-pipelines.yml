@@ -2,17 +2,14 @@ trigger: none
 pool:
   vmImage: 'ubuntu-latest'
 
-steps:
+jobs:
+- job: DeployInfrastructure
+  steps:
   - task: UsePythonVersion@0
     inputs:
       versionSpec: '3.x'
       addToPath: true
-
-  - script: |
-      sudo apt-get update
-      sudo apt-get install -y python3-pip
-      pip3 install --upgrade ansible
-    displayName: 'Install Ansible'
+      architecture: 'x64'
 
   - script: |
       cd $(System.DefaultWorkingDirectory)/terraform
@@ -20,9 +17,24 @@ steps:
       terraform plan
       terraform apply -auto-approve
     displayName: 'Terraform Apply'
+    env:
+      ARM_CLIENT_ID: $(clientId)
+      ARM_CLIENT_SECRET: $(clientSecret)
+      ARM_SUBSCRIPTION_ID: $(subscriptionId)
+      ARM_TENANT_ID: $(tenantId)
+    workingDirectory: $(System.DefaultWorkingDirectory)/terraform
+
+- job: DeployMediaWiki
+  dependsOn: DeployInfrastructure
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.x'
+      addToPath: true
+      architecture: 'x64'
 
   - script: |
       cd $(System.DefaultWorkingDirectory)/ansible
       ansible-playbook -i inventory.ini deploy_mediawiki.yml
-    displayName: 'Run Ansible Playbook'
-
+    displayName: 'Execute Ansible Playbook'
+    workingDirectory: $(System.DefaultWorkingDirectory)/terraform

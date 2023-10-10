@@ -75,7 +75,7 @@
       service:
         name: rh-php73-php-fpm
         state: restarted
-
+---
 - name: Configure MariaDB for MediaWiki
   tasks:
     - name: Start MariaDB service
@@ -89,8 +89,8 @@
         responses:
           'Enter current password for root (enter for none):': ''
           'Set root password? [Y/n]': 'Y'
-          'New password:': 'YOUR_ROOT_PASSWORD'  # Replace with your desired root password
-          'Re-enter new password:': 'YOUR_ROOT_PASSWORD'  # Replace with your desired root password
+          'New password:': '{{ mariadb_root_password }}'
+          'Re-enter new password:': '{{ mariadb_root_password }}'
           'Remove anonymous users? [Y/n]': 'Y'
           'Disallow root login remotely? [Y/n]': 'Y'
           'Remove test database and access to it? [Y/n]': 'Y'
@@ -100,7 +100,7 @@
       mysql_user:
         name: wiki
         host: localhost
-        password: YOUR_USER_PASSWORD  # Replace with your desired password
+        password: '{{ mediawiki_user_password }}'
         priv: 'wikidatabase.*:ALL'
 
     - name: Create MediaWiki database
@@ -111,33 +111,33 @@
   tasks:
     - name: Create a directory for MediaWiki installation
       file:
-        path: /home/username
+        path: '/home/{{ username }}'
         state: directory
-        owner: username  # Replace with the actual username
-        group: username  # Replace with the actual group name
+        owner: '{{ username }}'
+        group: '{{ username }}'
         mode: '0755'
 
     - name: Download MediaWiki tarball
       get_url:
         url: https://releases.wikimedia.org/mediawiki/1.40/mediawiki-1.40.0.tar.gz
-        dest: /home/username/mediawiki-1.40.0.tar.gz
+        dest: /home/{{ username }}/mediawiki-1.40.0.tar.gz
         mode: '0644'
-      become_user: username  # Replace with the actual username
+      become_user: {{ username }}  
 
     - name: Download GPG signature and verify tarball
       get_url:
         url: https://releases.wikimedia.org/mediawiki/1.40/mediawiki-1.40.0.tar.gz.sig
-        dest: /home/username/mediawiki-1.40.0.tar.gz.sig
+        dest: /home/{{ username }}/mediawiki-1.40.0.tar.gz.sig
         mode: '0644'
-      become_user: username  # Replace with the actual username
+      become_user: {{ username }}  
 
     - name: Verify GPG signature
-      command: gpg --verify /home/username/mediawiki-1.40.0.tar.gz.sig /home/username/mediawiki-1.40.0.tar.gz
-      become_user: username  # Replace with the actual username
+      command: gpg --verify /home/{{ username }}/mediawiki-1.40.0.tar.gz.sig /home/{{ username }}/mediawiki-1.40.0.tar.gz
+      become_user: {{ username }}  
 
     - name: Extract MediaWiki tarball
       unarchive:
-        src: /home/username/mediawiki-1.40.0.tar.gz
+        src: /home/{{ username }}/mediawiki-1.40.0.tar.gz
         dest: /var/www
         remote_src: yes
         owner: apache
